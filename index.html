@@ -1,0 +1,357 @@
+
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Pet Defense - Zombie Attack</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#10172a;color:white;font-family:Arial}
+header{text-align:center;padding:16px;background:#182442}
+h1{margin:0;color:#70ffb0}
+main{max-width:1000px;margin:auto;padding:12px}
+.stats{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px}
+.stat{flex:1;min-width:90px;padding:12px;background:#202e4d;border-radius:10px;text-align:center}
+.stat b{display:block;color:#7affb3;font-size:22px;margin-top:5px}
+canvas{display:block;width:100%;height:auto;border:2px solid #526d9b;border-radius:12px;background:#1c2d45;touch-action:manipulation}
+.row{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+button{border:0;border-radius:8px;padding:11px 14px;background:#34496f;color:white;font-weight:bold;cursor:pointer}
+button.primary{background:#65f5a6;color:#12223b}
+button:disabled{opacity:.4;cursor:not-allowed}
+.card{background:#192541;border:1px solid #304363;border-radius:12px;padding:15px;margin-top:12px}
+h2{font-size:18px;margin-top:0}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:8px}
+.item{background:#243452;border-radius:9px;padding:12px}
+.item p{font-size:13px;color:#c1cde0}
+.item button{width:100%}
+.muted{color:#b9c7dc;font-size:13px}
+#message{min-height:22px;color:#ffdc80}
+</style>
+</head>
+<body>
+<header>
+<h1>🐶 PET DEFENSE</h1>
+<p>Thú cưng chiến đấu chống lại binh đoàn zombie! 🧟</p>
+</header>
+<main>
+<div class="stats">
+ <div class="stat">❤️ Máu căn cứ<b id="hp">100</b></div>
+ <div class="stat">🪙 Vàng<b id="gold">0</b></div>
+ <div class="stat">💀 Đã hạ<b id="kills">0</b></div>
+ <div class="stat">🌊 Đợt<b id="wave">1</b></div>
+</div>
+
+<canvas id="game" width="900" height="400"></canvas>
+<p id="message">Nhấn Bắt đầu để bảo vệ căn cứ!</p>
+<div class="row">
+ <button class="primary" id="start">▶ Bắt đầu</button>
+ <button id="pause">⏸ Tạm dừng</button>
+ <button id="skill">🔥 Siêu kỹ năng</button>
+ <button id="heal">❤️ Hồi máu (40 vàng)</button>
+</div>
+<p class="muted">Máy tính: dùng W/S hoặc phím ↑/↓ để di chuyển thú cưng. Điện thoại: chạm phía trên hoặc dưới thú cưng để di chuyển.</p>
+
+<div class="card">
+<h2>🛠️ Nâng cấp chiến đấu</h2>
+<div class="grid">
+ <div class="item">
+  <h3>🔫 Sức mạnh</h3>
+  <p>Tăng sát thương mỗi viên đạn.</p>
+  <b id="damageLevel">Cấp 1</b><p id="damageCost">Giá: 30 vàng</p>
+  <button id="damageBuy">Nâng cấp</button>
+ </div>
+ <div class="item">
+  <h3>⚡ Tốc độ bắn</h3>
+  <p>Bắn nhanh hơn để diệt zombie.</p>
+  <b id="speedLevel">Cấp 1</b><p id="speedCost">Giá: 40 vàng</p>
+  <button id="speedBuy">Nâng cấp</button>
+ </div>
+ <div class="item">
+  <h3>🐱 Mèo hỗ trợ</h3>
+  <p>Mèo bắn thêm đạn gây sát thương.</p>
+  <b id="petLevel">Chưa mở khóa</b><p id="petCost">Giá: 100 vàng</p>
+  <button id="petBuy">Mở khóa</button>
+ </div>
+ <div class="item">
+  <h3>🏰 Gia cố căn cứ</h3>
+  <p>Tăng máu tối đa thêm 25.</p>
+  <b id="baseLevel">Cấp 1</b><p id="baseCost">Giá: 60 vàng</p>
+  <button id="baseBuy">Nâng cấp</button>
+ </div>
+</div>
+</div>
+
+<div class="card">
+<h2>🎯 Nhiệm vụ</h2>
+<p id="mission">Hạ 10 zombie để nhận 50 vàng.</p>
+<p id="progress">Tiến độ: 0/10</p>
+<button id="claim">Nhận thưởng</button>
+</div>
+</main>
+
+<script>
+const $=id=>document.getElementById(id);
+const cv=$("game"),ctx=cv.getContext("2d");
+const W=cv.width,H=cv.height;
+let saved={};
+try{saved=JSON.parse(localStorage.getItem("petDefenseSave")||"{}")}catch{}
+const data={
+ gold:0,kills:0,best:0,damage:1,fireRate:1,pet:0,base:1,
+ claimed:0,...saved
+};
+let hp=100,maxHp=100,wave=1;
+let petY=260,zombies=[],bullets=[],particles=[];
+let running=false,paused=false,gameOver=false;
+let frame=0,lastShot=0,lastSpawn=0,skillReady=true;
+let raf=0;
+
+function save(){
+ localStorage.setItem("petDefenseSave",JSON.stringify(data));
+}
+function updateUI(){
+ $("hp").textContent=Math.max(0,hp)+"/"+maxHp;
+ $("gold").textContent=data.gold;
+ $("kills").textContent=data.kills;
+ $("wave").textContent=wave;
+ $("damageLevel").textContent="Cấp "+data.damage;
+ $("speedLevel").textContent="Cấp "+data.fireRate;
+ $("petLevel").textContent=data.pet?"Đang hỗ trợ":"Chưa mở khóa";
+ $("baseLevel").textContent="Cấp "+data.base;
+ $("damageCost").textContent="Giá: "+(30*data.damage)+" vàng";
+ $("speedCost").textContent="Giá: "+(40*data.fireRate)+" vàng";
+ $("petCost").textContent=data.pet?"Đã mở khóa":"Giá: 100 vàng";
+ $("baseCost").textContent="Giá: "+(60*data.base)+" vàng";
+ $("damageBuy").disabled=data.gold<30*data.damage||data.damage>=10;
+ $("speedBuy").disabled=data.gold<40*data.fireRate||data.fireRate>=8;
+ $("petBuy").disabled=!!data.pet||data.gold<100;
+ $("baseBuy").disabled=data.gold<60*data.base||data.base>=8;
+ $("progress").textContent="Tiến độ: "+(data.kills%10)+"/10";
+ $("claim").disabled=data.kills<10*(data.claimed+1);
+ $("mission").textContent="Hạ "+(10*(data.claimed+1))+
+ " zombie để nhận "+(50*(data.claimed+1))+" vàng.";
+}
+function rect(x,y,w,h,color){
+ ctx.fillStyle=color;ctx.fillRect(x,y,w,h);
+}
+function text(t,x,y,size,color="white"){
+ ctx.fillStyle=color;ctx.font="bold "+size+"px Arial";ctx.fillText(t,x,y);
+}
+function drawBackground(){
+ let sky=ctx.createLinearGradient(0,0,0,H);
+ sky.addColorStop(0,"#152441");sky.addColorStop(1,"#40506a");
+ ctx.fillStyle=sky;ctx.fillRect(0,0,W,H);
+ // Moon
+ ctx.fillStyle="#f5e7ae";ctx.beginPath();ctx.arc(730,65,27,0,7);ctx.fill();
+ // City skyline
+ for(let i=0;i<12;i++){
+  let x=i*82;
+  rect(x,130+(i%3)*25,55,200,"#202b40");
+  for(let j=0;j<3;j++)for(let k=0;k<4;k++)
+   rect(x+8+j*14,145+(i%3)*25+k*24,6,9,"#b9a76b");
+ }
+ rect(0,330,W,70,"#374436");
+ for(let i=0;i<22;i++){
+  rect(i*44,338+(i%3)*12,25,3,"#59664c");
+ }
+ // Base
+ rect(20,235,90,100,"#758aa0");
+ rect(12,225,106,15,"#b6c8d7");
+ rect(35,260,22,30,"#26344c");
+ text("BASE",30,316,13);
+}
+function drawPet(){
+ // Dog
+ ctx.fillStyle="#e9e6d9";ctx.beginPath();ctx.ellipse(155,petY,27,22,0,0,7);ctx.fill();
+ ctx.beginPath();ctx.arc(164,petY-24,23,0,7);ctx.fill();
+ ctx.fillStyle="#5b493e";
+ ctx.beginPath();ctx.ellipse(146,petY-39,8,15,-.5,0,7);ctx.fill();
+ ctx.fillStyle="#f4f0e8";
+ ctx.beginPath();ctx.arc(169,petY-27,4,0,7);ctx.fill();
+ ctx.fillStyle="#172033";ctx.beginPath();ctx.arc(170,petY-27,2,0,7);ctx.fill();
+ ctx.fillStyle="#efac8a";ctx.beginPath();ctx.arc(187,petY-18,5,0,7);ctx.fill();
+ rect(141,petY+12,10,15,"#d8dedf");
+ rect(165,petY+12,10,15,"#d8dedf");
+ // Gun
+ rect(185,petY-7,32,9,"#8ca2bb");
+ rect(207,petY-5,12,5,"#ffd16e");
+ text("🐶",120,petY-42,18);
+ if(data.pet){
+  ctx.fillStyle="#eaa16a";ctx.beginPath();ctx.arc(115,petY+23,15,0,7);ctx.fill();
+  text("🐱",99,petY+29,20);
+ }
+}
+function drawZombie(z){
+ ctx.fillStyle=z.boss?"#9b55a8":z.fast?"#b5d76b":"#7fba72";
+ ctx.beginPath();ctx.arc(z.x,z.y-15,z.boss?21:15,0,7);ctx.fill();
+ rect(z.x-13,z.y-1,26,23,z.boss?"#75478e":"#557e57");
+ ctx.fillStyle="#f4f0d0";
+ ctx.beginPath();ctx.arc(z.x-5,z.y-17,4,0,7);ctx.arc(z.x+5,z.y-17,4,0,7);ctx.fill();
+ ctx.fillStyle="#252b25";
+ ctx.beginPath();ctx.arc(z.x-5,z.y-17,2,0,7);ctx.arc(z.x+5,z.y-17,2,0,7);ctx.fill();
+ rect(z.x-15,z.y-40,30,4,"#402e3d");
+ rect(z.x-15,z.y-40,30*Math.max(0,z.hp/z.maxHp),4,"#f86a6a");
+ if(z.boss)text("BOSS",z.x-19,z.y-46,10,"#ffd16e");
+}
+function draw(){
+ drawBackground();
+ // Bullets
+ bullets.forEach(b=>{
+  ctx.fillStyle=b.power?"#ff4f7b":"#ffe27a";
+  ctx.beginPath();ctx.ellipse(b.x,b.y,8,4,0,0,7);ctx.fill();
+ });
+ zombies.forEach(drawZombie);
+ drawPet();
+ particles.forEach(p=>{
+  ctx.globalAlpha=Math.max(0,p.life/25);
+  text(p.txt,p.x,p.y,16,p.color);ctx.globalAlpha=1;
+ });
+ if(paused||gameOver){
+  rect(0,0,W,H,"#071020bb");
+  text(gameOver?"GAME OVER":"TẠM DỪNG",W/2-95,180,32);
+  text("Nhấn Bắt đầu để tiếp tục",W/2-110,220,17,"#9dffca");
+ }
+}
+function spawn(){
+ const boss=wave%5===0&&Math.random()<.45;
+ const fast=!boss&&Math.random()<.25;
+ const maxHpZombie=boss?160+wave*10:fast?24+wave*2:40+wave*4;
+ zombies.push({
+  x:W+15,y:300+Math.random()*25,
+  hp:maxHpZombie,maxHp:maxHpZombie,
+  speed:(boss?0.35:fast?1.15:.65)+wave*.035,
+  fast,boss,hit:0
+ });
+}
+function shoot(){
+ bullets.push({x:215,y:petY-3,v:7+data.fireRate*.35,
+  damage:10+data.damage*6,power:false});
+ if(data.pet)bullets.push({x:175,y:petY+18,v:6,
+  damage:8+data.damage*2,power:false});
+}
+function tick(){
+ if(!running||paused||gameOver)return;
+ frame++;
+ if(frame-lastSpawn>Math.max(28,90-wave*3)){
+  spawn();lastSpawn=frame;
+ }
+ if(frame-lastShot>Math.max(9,35-data.fireRate*3)){
+  shoot();lastShot=frame;
+ }
+ bullets.forEach(b=>b.x+=b.v);
+ bullets=bullets.filter(b=>b.x<W+10);
+ zombies.forEach(z=>{
+  z.x-=z.speed;
+  if(z.hit>0)z.hit--;
+  if(z.x<110){
+   z.x=109;
+   hp-=z.boss?15:5;
+   z.hp=0;
+   $("message").textContent="💥 Zombie đã tấn công căn cứ!";
+  }
+ });
+ for(let i=bullets.length-1;i>=0;i--){
+  const b=bullets[i];
+  const z=zombies.find(z=>z.hp>0&&Math.abs(z.x-b.x)<23&&Math.abs(z.y-b.y)<25);
+  if(z){
+   z.hp-=b.damage;z.hit=4;
+   particles.push({x:z.x,y:z.y-35,txt:"-"+b.damage,color:"#ffe27a",life:25});
+   bullets.splice(i,1);
+   if(z.hp<=0){
+    data.kills++;data.gold+=z.boss?25:z.fast?8:5;
+    particles.push({x:z.x,y:z.y-45,txt:"+VÀNG",color:"#ffd16e",life:30});
+   }
+  }
+ }
+ zombies=zombies.filter(z=>z.hp>0&&z.x>-30);
+ particles.forEach(p=>{p.y-=.6;p.life--});
+ particles=particles.filter(p=>p.life>0);
+ wave=Math.max(1,Math.floor(data.kills/10)+1);
+ if(hp<=0){
+  hp=0;gameOver=true;running=false;
+  $("message").textContent="Căn cứ thất thủ! Nâng cấp rồi chiến đấu tiếp.";
+ }
+ if(frame%30===0){save();updateUI()}
+ draw();
+ if(running)raf=requestAnimationFrame(tick);
+}
+function start(){
+ if(running)return;
+ if(gameOver){
+  hp=maxHp;zombies=[];bullets=[];particles=[];
+  gameOver=false;paused=false;frame=0;lastSpawn=0;lastShot=0;
+ }
+ running=true;paused=false;
+ $("message").textContent="Bảo vệ căn cứ! Thú cưng đang tự động chiến đấu.";
+ $("start").textContent="▶ Đang chiến đấu";
+ cancelAnimationFrame(raf);
+ raf=requestAnimationFrame(tick);
+}
+function pause(){
+ if(!running)return;
+ paused=!paused;
+ $("pause").textContent=paused?"▶ Tiếp tục":"⏸ Tạm dừng";
+ if(paused){draw();$("message").textContent="Trận đấu đang tạm dừng."}
+ else{raf=requestAnimationFrame(tick);$("message").textContent="Tiếp tục chiến đấu!"}
+}
+$("start").onclick=start;
+$("pause").onclick=pause;
+$("damageBuy").onclick=()=>{
+ let cost=30*data.damage;
+ if(data.gold>=cost&&data.damage<10){data.gold-=cost;data.damage++;updateUI();save()}
+};
+$("speedBuy").onclick=()=>{
+ let cost=40*data.fireRate;
+ if(data.gold>=cost&&data.fireRate<8){data.gold-=cost;data.fireRate++;updateUI();save()}
+};
+$("petBuy").onclick=()=>{
+ if(data.gold>=100&&!data.pet){data.gold-=100;data.pet=1;updateUI();save()}
+};
+$("baseBuy").onclick=()=>{
+ let cost=60*data.base;
+ if(data.gold>=cost&&data.base<8){
+  data.gold-=cost;data.base++;maxHp+=25;hp=Math.min(maxHp,hp+25);
+  updateUI();save()
+ }
+};
+$("heal").onclick=()=>{
+ if(data.gold>=40&&hp<maxHp){
+  data.gold-=40;hp=Math.min(maxHp,hp+40);
+  updateUI();save()
+ }else $("message").textContent="Không đủ vàng hoặc máu đã đầy!";
+};
+$("skill").onclick=()=>{
+ if(!running||paused||!skillReady)return;
+ skillReady=false;
+ zombies.forEach(z=>{
+  z.hp-=60;
+  particles.push({x:z.x,y:z.y-35,txt:"🔥",color:"#ff794b",life:35});
+  if(z.hp<=0){data.kills++;data.gold+=z.boss?25:5}
+ });
+ zombies=zombies.filter(z=>z.hp>0);
+ $("message").textContent="🔥 SIÊU KỸ NĂNG! Gây 60 sát thương toàn màn hình.";
+ updateUI();save();draw();
+ setTimeout(()=>{skillReady=true;$("message").textContent="Siêu kỹ năng đã sẵn sàng!"},8000);
+};
+$("claim").onclick=()=>{
+ let required=10*(data.claimed+1);
+ if(data.kills>=required){
+  data.gold+=50*(data.claimed+1);data.claimed++;
+  $("message").textContent="🎉 Hoàn thành nhiệm vụ! Nhận vàng thành công.";
+  updateUI();save();
+ }
+};
+cv.addEventListener("pointerdown",e=>{
+ const r=cv.getBoundingClientRect();
+ const y=(e.clientY-r.top)*H/r.height;
+ if(y<petY-15)petY=Math.max(70,petY-35);
+ else petY=Math.min(310,petY+35);
+});
+document.addEventListener("keydown",e=>{
+ if(e.key==="ArrowUp"||e.key.toLowerCase()==="w")petY=Math.max(70,petY-25);
+ if(e.key==="ArrowDown"||e.key.toLowerCase()==="s")petY=Math.min(310,petY+25);
+});
+updateUI();draw();
+</script>
+</body>
+</html>
